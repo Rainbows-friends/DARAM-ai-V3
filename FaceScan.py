@@ -11,7 +11,7 @@ if not os.path.exists(log_dir):
     os.makedirs(log_dir)
 
 logging.basicConfig(filename=os.path.join(log_dir, 'face_recognition.log'), level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s')
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 def log_and_print(message):
@@ -25,7 +25,9 @@ log_and_print(f"Model loaded from {model_path}")
 
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
-categories = ['known_face_1', 'known_face_2', 'non_face']
+data_dir = 'C:\\DARAM-ai-Archive'
+categories = [name for name in os.listdir(os.path.join(data_dir, 'knows_faces')) if
+              os.path.isdir(os.path.join(data_dir, 'knows_faces', name))]
 
 
 def preprocess_face(face):
@@ -49,11 +51,11 @@ def recognize_faces(frame):
 
         if confidence > 0.5:
             label = categories[max_index]
-            color = (255, 255, 0)
+            color = (255, 255, 0)  # 하늘색
             log_and_print(f"Recognized {label} with confidence {confidence:.2f}")
         else:
             label = "Unknown"
-            color = (0, 0, 255)
+            color = (0, 0, 255)  # 빨간색
             log_and_print("Detected unknown face")
 
         cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
