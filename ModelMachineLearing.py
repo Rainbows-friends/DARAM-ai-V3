@@ -2,12 +2,18 @@ import os
 
 import cv2
 import numpy as np
+import tensorflow as tf
 from keras._tf_keras.keras.models import Sequential
 from keras._tf_keras.keras.utils import to_categorical
 from keras_preprocessing.image import img_to_array, load_img
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense
 from tensorflow.keras.optimizers import Adam
+
+physical_devices = tf.config.list_physical_devices('GPU')
+if physical_devices:
+    for device in physical_devices:
+        tf.config.experimental.set_memory_growth(device, True)
 
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
@@ -26,6 +32,9 @@ def detect_faces(image_path):
 def load_data(data_dir, categories, img_size=(64, 64)):
     data = []
     labels = []
+    total_files = sum([len(files) for r, d, files in os.walk(data_dir)])
+    processed_files = 0
+
     for category in categories:
         path = os.path.join(data_dir, category)
         class_num = categories.index(category)
@@ -45,6 +54,8 @@ def load_data(data_dir, categories, img_size=(64, 64)):
                             img_array = img_to_array(img)
                             data.append(img_array)
                             labels.append(class_num)
+                        processed_files += 1
+                        print(f"Processing {processed_files}/{total_files} files", end='\r')
                     except Exception as e:
                         print(e)
     data = np.array(data, dtype="float") / 255.0
@@ -63,7 +74,7 @@ model = Sequential([Conv2D(32, (3, 3), activation='relu', input_shape=(64, 64, 3
     Conv2D(64, (3, 3), activation='relu'), MaxPooling2D((2, 2)), Flatten(), Dense(128, activation='relu'),
     Dense(len(categories), activation='softmax')])
 
-model.compile(optimizer=Adam(lr=0.001), loss='categorical_crossentropy', metrics=['accuracy'])
+model.compile(optimizer=Adam(learning_rate=0.001), loss='categorical_crossentropy', metrics=['accuracy'])
 
 model.fit(trainX, trainY, epochs=10, validation_data=(testX, testY), batch_size=32)
 
