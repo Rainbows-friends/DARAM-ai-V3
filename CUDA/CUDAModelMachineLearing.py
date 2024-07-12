@@ -122,7 +122,6 @@ def train_face_detection_model():
     torch.save(model.state_dict(), 'face_detection_model.pth')
     print("모델 저장 완료: face_detection_model.pth")
 
-    # 테스트 셋 평가
     model.eval()
     correct = 0
     total = 0
@@ -164,7 +163,7 @@ def train_face_recognition_model():
 
     for label, face_dir in enumerate(os.listdir(KNOWN_FACES_DIR)):
         face_path = os.path.join(KNOWN_FACES_DIR, face_dir)
-        if face_dir == 'Other' or len(os.listdir(face_path)) < 200:
+        if face_dir == 'Other':
             continue
         valid_classes.append(face_dir)
         label_mapping[len(valid_classes) - 1] = face_dir
@@ -174,7 +173,7 @@ def train_face_recognition_model():
 
     num_classes = len(valid_classes)
     all_images = np.array(all_images, dtype="float32") / 255.0
-    all_labels = np.array(all_labels, dtype="int64")  # 정수형으로 변환
+    all_labels = np.array(all_labels, dtype="int64")
 
     X_train, X_test, y_train, y_test = train_test_split(all_images, all_labels, test_size=0.2, random_state=42)
 
