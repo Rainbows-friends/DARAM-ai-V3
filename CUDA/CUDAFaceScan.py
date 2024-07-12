@@ -1,16 +1,14 @@
-import os
 import json
+
 import cv2
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import transforms
 
-# GPU 설정을 제거하고 CPU만 사용하도록 변경
 device = torch.device("cpu")
 print(f"Using device: {device}")
 
-# 얼굴 검출 모델 정의
 class SimpleCNN(nn.Module):
     def __init__(self):
         super(SimpleCNN, self).__init__()
@@ -34,7 +32,7 @@ class SimpleCNN(nn.Module):
         x = self.fc2(x)
         return x
 
-# 얼굴 분류 모델 정의
+
 class FaceRecognitionCNN(nn.Module):
     def __init__(self, num_classes):
         super(FaceRecognitionCNN, self).__init__()
@@ -58,7 +56,7 @@ class FaceRecognitionCNN(nn.Module):
         x = self.fc2(x)
         return x
 
-# 모델 로드 함수
+
 def load_model(model_path, model_class, num_classes=None):
     if num_classes:
         model = model_class(num_classes)
@@ -69,7 +67,7 @@ def load_model(model_path, model_class, num_classes=None):
     model.eval()
     return model
 
-# 얼굴 검출 함수
+
 def detect_faces(image, face_detector):
     face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -85,7 +83,7 @@ def detect_faces(image, face_detector):
             detected_faces.append((x, y, w, h, face_tensor))
     return detected_faces
 
-# 얼굴 분류 함수
+
 def classify_faces(detected_faces, face_recognizer, label_mapping):
     results = []
     for (x, y, w, h, face_tensor) in detected_faces:
@@ -95,50 +93,43 @@ def classify_faces(detected_faces, face_recognizer, label_mapping):
         results.append((x, y, w, h, label))
     return results
 
-# 웹캠에서 사진 찍기
-def capture_image_from_webcam():
+
+def process_webcam_stream(face_detector, face_recognizer, label_mapping):
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("Error: Could not open webcam.")
-        return None
+        return
 
-    ret, frame = cap.read()
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("Error: Could not read frame.")
+            break
+
+        detected_faces = detect_faces(frame, face_detector)
+        if detected_faces:
+            results = classify_faces(detected_faces, face_recognizer, label_mapping)
+            for (x, y, w, h, label) in results:
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
+                cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
+
+        cv2.imshow('Face Detection and Recognition', frame)
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
     cap.release()
-    if not ret:
-        print("Error: Could not read frame.")
-        return None
+    cv2.destroyAllWindows()
 
-    return frame
 
-# 메인 함수
 def main():
-    # 모델 로드
     face_detector = load_model('face_detection_model.pth', SimpleCNN)
     with open('label_mapping.json', 'r') as f:
         label_mapping = json.load(f)
     face_recognizer = load_model('face_recognition_model.pth', FaceRecognitionCNN, num_classes=len(label_mapping))
 
-    # 웹캠에서 사진 찍기
-    image = capture_image_from_webcam()
-    if image is None:
-        return
+    process_webcam_stream(face_detector, face_recognizer, label_mapping)
 
-    # 얼굴 검출
-    detected_faces = detect_faces(image, face_detector)
-    if not detected_faces:
-        print("No faces detected.")
-        return
-
-    # 얼굴 분류
-    results = classify_faces(detected_faces, face_recognizer, label_mapping)
-
-    # 결과 출력 및 시각화
-    for (x, y, w, h, label) in results:
-        cv2.rectangle(image, (x, y), (x + w, y + h), (255, 0, 0), 2)
-        cv2.putText(image, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
-    cv2.imshow('Face Detection and Recognition', image)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main()
