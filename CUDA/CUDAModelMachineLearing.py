@@ -4,21 +4,43 @@ import random
 
 import cv2
 import numpy as np
-from keras._tf_keras.keras.callbacks import EarlyStopping, ModelCheckpoint
-from keras._tf_keras.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, BatchNormalization
-from keras._tf_keras.keras.utils import to_categorical
-from keras.src.models import Sequential
-from keras_preprocessing.image import ImageDataGenerator
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
 from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader, Dataset
+from torchvision import transforms
 
-KNOWN_FACES_DIR = 'C:\\DARAM-ai-Archive\\knows_faces'
-OTHER_FACES_DIR = 'C:\\DARAM-ai-Archive\\non_faces'
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
+BASE_DIR = 'C:\\DARAM-ai-Archive'
+KNOWN_FACES_DIR = os.path.join(BASE_DIR, 'knows_faces')
+OTHER_FACES_DIR = os.path.join(BASE_DIR, 'non_faces')
+
+
+class FaceDataset(Dataset):
+    def __init__(self, images, labels, transform=None):
+        self.images = images
+        self.labels = labels
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        image = self.images[idx]
+        label = self.labels[idx]
+        if self.transform:
+            image = self.transform(image)
+        return image, label
 
 
 def load_images_from_folder(folder, label, img_size=(128, 128)):
     images = []
     labels = []
-    for subdir, _, files in os.walk(folder):
+    for subdir, dirs, files in os.walk(folder):
         for file in files:
             img_path = os.path.join(subdir, file)
             img = cv2.imread(img_path)
@@ -27,18 +49,6 @@ def load_images_from_folder(folder, label, img_size=(128, 128)):
                 images.append(img)
                 labels.append(label)
     return images, labels
-
-
-def detect_faces(image_path):
-    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-    img = cv2.imread(image_path)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-    detected_faces = []
-    for (x, y, w, h) in faces:
-        face = img[y:y + h, x:x + w]
-        detected_faces.append(cv2.resize(face, (128, 128)))
-    return detected_faces
 
 
 def train_face_detection_model():
@@ -54,40 +64,77 @@ def train_face_detection_model():
     all_labels.extend(non_labels)
 
     all_images = np.array(all_images, dtype="float32") / 255.0
-    all_labels = to_categorical(np.array(all_labels), num_classes=2)
+    all_labels = np.array(all_labels, dtype="int64")
 
     X_train, X_test, y_train, y_test = train_test_split(all_images, all_labels, test_size=0.2, random_state=42)
 
-    datagen = ImageDataGenerator(rotation_range=20, width_shift_range=0.2, height_shift_range=0.2, shear_range=0.2,
-                                 zoom_range=0.2, horizontal_flip=True, fill_mode='nearest')
+    transform = transforms.Compose([transforms.ToTensor()])
 
-    model = Sequential(
-        [Conv2D(32, (3, 3), activation='relu', input_shape=(128, 128, 3)), BatchNormalization(), MaxPooling2D((2, 2)),
-         Conv2D(64, (3, 3), activation='relu'), BatchNormalization(), MaxPooling2D((2, 2)),
-         Conv2D(128, (3, 3), activation='relu'), BatchNormalization(), MaxPooling2D((2, 2)),
-         Conv2D(256, (3, 3), activation='relu'), BatchNormalization(), MaxPooling2D((2, 2)), Flatten(),
-         Dense(512, activation='relu'), Dropout(0.5), Dense(2, activation='softmax')])
+    train_dataset = FaceDataset(X_train, y_train, transform=transform)
+    test_dataset = FaceDataset(X_test, y_test, transform=transform)
 
-    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
 
-    early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
-    model_checkpoint = ModelCheckpoint('best_face_detection_model.h5', save_best_only=True, monitor='val_loss')
+    class SimpleCNN(nn.Module):
+        def __init__(self):
+            super(SimpleCNN, self).__init__()
+            self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1)
+            self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
+            self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1)
+            self.conv4 = nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1)
+            self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+            self.fc1 = nn.Linear(256 * 8 * 8, 512)
+            self.fc2 = nn.Linear(512, 2)
+            self.dropout = nn.Dropout(0.5)
 
-    model.fit(datagen.flow(X_train, y_train, batch_size=32), epochs=20, validation_data=(X_test, y_test),
-              callbacks=[early_stopping, model_checkpoint])
+        def forward(self, x):
+            x = self.pool(F.relu(self.conv1(x)))
+            x = self.pool(F.relu(self.conv2(x)))
+            x = self.pool(F.relu(self.conv3(x)))
+            x = self.pool(F.relu(self.conv4(x)))
+            x = x.view(-1, 256 * 8 * 8)
+            x = F.relu(self.fc1(x))
+            x = self.dropout(x)
+            x = self.fc2(x)
+            return x
 
-    model.save('face_detection_model.h5')
-    print("모델 저장 완료: face_detection_model.h5")
+    model = SimpleCNN().to(device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-    predictions = model.predict(X_test)
-    predicted_labels = np.argmax(predictions, axis=1)
-    true_labels = np.argmax(y_test, axis=1)
+    num_epochs = 20
+    for epoch in range(num_epochs):
+        model.train()
+        running_loss = 0.0
+        for images, labels in train_loader:
+            images, labels = images.to(device), labels.to(device)
 
-    print("테스트 셋에서의 정확도: ", np.mean(predicted_labels == true_labels))
-    for i in range(10):
-        true_label = true_labels[i]
-        predicted_label = predicted_labels[i]
-        print(f"실제 라벨: {true_label}, 예측 라벨: {predicted_label}")
+            optimizer.zero_grad()
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item()
+
+        print(f"Epoch {epoch + 1}, Loss: {running_loss / len(train_loader)}")
+
+    torch.save(model.state_dict(), 'face_detection_model.pth')
+    print("모델 저장 완료: face_detection_model.pth")
+
+    # 테스트 셋 평가
+    model.eval()
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for images, labels in test_loader:
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+
+    print("테스트 셋에서의 정확도: ", 100 * correct / total)
 
 
 def load_images_for_recognition(folder, label=None, sample_size=None):
@@ -126,44 +173,80 @@ def train_face_recognition_model():
         all_labels.extend(labels)
 
     num_classes = len(valid_classes)
-    all_images = np.array(all_images, dtype="float32")
-    all_labels = to_categorical(np.array(all_labels), num_classes=num_classes)
+    all_images = np.array(all_images, dtype="float32") / 255.0
+    all_labels = np.array(all_labels, dtype="int64")  # 정수형으로 변환
 
     X_train, X_test, y_train, y_test = train_test_split(all_images, all_labels, test_size=0.2, random_state=42)
 
-    datagen = ImageDataGenerator(rotation_range=20, width_shift_range=0.2, height_shift_range=0.2, shear_range=0.2,
-                                 zoom_range=0.2, horizontal_flip=True, fill_mode='nearest')
+    transform = transforms.Compose([transforms.ToTensor()])
 
-    model = Sequential(
-        [Conv2D(32, (3, 3), activation='relu', input_shape=(128, 128, 3)), BatchNormalization(), MaxPooling2D((2, 2)),
-         Conv2D(64, (3, 3), activation='relu'), BatchNormalization(), MaxPooling2D((2, 2)),
-         Conv2D(128, (3, 3), activation='relu'), BatchNormalization(), MaxPooling2D((2, 2)),
-         Conv2D(256, (3, 3), activation='relu'), BatchNormalization(), MaxPooling2D((2, 2)), Flatten(),
-         Dense(512, activation='relu'), Dropout(0.5), Dense(num_classes, activation='softmax')])
+    train_dataset = FaceDataset(X_train, y_train, transform=transform)
+    test_dataset = FaceDataset(X_test, y_test, transform=transform)
 
-    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
 
-    early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
-    model_checkpoint = ModelCheckpoint('best_face_recognition_model.h5', save_best_only=True, monitor='val_loss')
+    class FaceRecognitionCNN(nn.Module):
+        def __init__(self, num_classes):
+            super(FaceRecognitionCNN, self).__init__()
+            self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1)
+            self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
+            self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1)
+            self.conv4 = nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1)
+            self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+            self.fc1 = nn.Linear(256 * 8 * 8, 512)
+            self.fc2 = nn.Linear(512, num_classes)
+            self.dropout = nn.Dropout(0.5)
 
-    model.fit(datagen.flow(X_train, y_train, batch_size=32), epochs=20, validation_data=(X_test, y_test),
-              callbacks=[early_stopping, model_checkpoint])
+        def forward(self, x):
+            x = self.pool(F.relu(self.conv1(x)))
+            x = self.pool(F.relu(self.conv2(x)))
+            x = self.pool(F.relu(self.conv3(x)))
+            x = self.pool(F.relu(self.conv4(x)))
+            x = x.view(-1, 256 * 8 * 8)
+            x = F.relu(self.fc1(x))
+            x = self.dropout(x)
+            x = self.fc2(x)
+            return x
 
-    model.save('face_recognition_model.h5')
-    print("모델 저장 완료: face_recognition_model.h5")
+    model = FaceRecognitionCNN(num_classes).to(device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+    num_epochs = 20
+    for epoch in range(num_epochs):
+        model.train()
+        running_loss = 0.0
+        for images, labels in train_loader:
+            images, labels = images.to(device), labels.to(device)
+
+            optimizer.zero_grad()
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item()
+
+        print(f"Epoch {epoch + 1}, Loss: {running_loss / len(train_loader)}")
+
+    torch.save(model.state_dict(), 'face_recognition_model.pth')
+    print("모델 저장 완료: face_recognition_model.pth")
 
     with open('label_mapping.json', 'w') as f:
         json.dump(label_mapping, f)
 
-    predictions = model.predict(X_test)
-    predicted_labels = np.argmax(predictions, axis=1)
-    true_labels = np.argmax(y_test, axis=1)
+    model.eval()
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for images, labels in test_loader:
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
 
-    print("테스트 셋에서의 정확도: ", np.mean(predicted_labels == true_labels))
-    for i in range(10):
-        true_label = true_labels[i]
-        predicted_label = predicted_labels[i]
-        print(f"실제 라벨: {true_label}, 예측 라벨: {predicted_label}")
+    print("테스트 셋에서의 정확도: ", 100 * correct / total)
 
 
 if __name__ == "__main__":
