@@ -1,17 +1,17 @@
 import json
 import os
 import random
-
 import cv2
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from keras.src.callbacks import ReduceLROnPlateau
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
+
+cv2.setLogLevel(cv2.LOG_LEVEL_SILENT)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
@@ -19,7 +19,6 @@ print(f"Using device: {device}")
 BASE_DIR = 'C:\\DARAM-ai-Archive'
 KNOWN_FACES_DIR = os.path.join(BASE_DIR, 'knows_faces')
 OTHER_FACES_DIR = os.path.join(BASE_DIR, 'non_faces')
-
 
 class FaceDataset(Dataset):
     def __init__(self, images, labels, transform=None):
@@ -37,20 +36,21 @@ class FaceDataset(Dataset):
             image = self.transform(image)
         return image, label
 
-
 def load_images_from_folder(folder, label, img_size=(128, 128)):
     images = []
     labels = []
     for subdir, dirs, files in os.walk(folder):
         for file in files:
             img_path = os.path.join(subdir, file)
-            img = cv2.imread(img_path)
-            if img is not None:
-                img = cv2.resize(img, img_size)
-                images.append(img)
-                labels.append(label)
+            try:
+                img = cv2.imread(img_path)
+                if img is not None and img.size > 0:
+                    img = cv2.resize(img, img_size)
+                    images.append(img)
+                    labels.append(label)
+            except Exception as e:
+                print(f"Error loading image {img_path}: {e}")
     return images, labels
-
 
 def train_face_detection_model():
     all_images = []
@@ -69,10 +69,13 @@ def train_face_detection_model():
 
     X_train, X_test, y_train, y_test = train_test_split(all_images, all_labels, test_size=0.2, random_state=42)
 
-    transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.RandomHorizontalFlip(), transforms.RandomRotation(10),
-            transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
-            transforms.RandomResizedCrop(128, scale=(0.8, 1.0)), ])
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomRotation(10),
+        transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
+        transforms.RandomResizedCrop(128, scale=(0.8, 1.0)),
+    ])
 
     train_dataset = FaceDataset(X_train, y_train, transform=transform)
     test_dataset = FaceDataset(X_test, y_test, transform=transforms.ToTensor())
@@ -89,7 +92,7 @@ def train_face_detection_model():
             self.conv4 = nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1)
             self.conv5 = nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1)  # 추가
             self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-            self.fc1 = nn.Linear(512 * 4 * 4, 1024)
+            self.fc1 = nn.Linear(512 * 4 * 4, 1024)  # 크기 조정
             self.fc2 = nn.Linear(1024, 2)
             self.dropout = nn.Dropout(0.5)
 
@@ -98,8 +101,8 @@ def train_face_detection_model():
             x = self.pool(F.relu(self.conv2(x)))
             x = self.pool(F.relu(self.conv3(x)))
             x = self.pool(F.relu(self.conv4(x)))
-            x = self.pool(F.relu(self.conv5(x)))
-            x = x.view(-1, 512 * 4 * 4)
+            x = self.pool(F.relu(self.conv5(x)))  # 추가
+            x = x.view(-1, 512 * 4 * 4)  # 크기 조정
             x = F.relu(self.fc1(x))
             x = self.dropout(x)
             x = self.fc2(x)
@@ -108,7 +111,7 @@ def train_face_detection_model():
     model = SimpleCNN().to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.0001)
-    scheduler = ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.1)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.1)
 
     num_epochs = 50
     for epoch in range(num_epochs):
@@ -125,6 +128,8 @@ def train_face_detection_model():
             running_loss += loss.item()
 
         print(f"Epoch {epoch + 1}, Loss: {running_loss / len(train_loader)}")
+
+        # Validation loss 확인 및 스케줄러 업데이트
         model.eval()
         val_loss = 0.0
         with torch.no_grad():
@@ -152,7 +157,6 @@ def train_face_detection_model():
 
     print("테스트 셋에서의 정확도: ", 100 * correct / total)
 
-
 def load_images_for_recognition(folder, label=None, sample_size=None):
     images = []
     labels = []
@@ -163,14 +167,16 @@ def load_images_for_recognition(folder, label=None, sample_size=None):
 
     for filename in file_list:
         img_path = os.path.join(folder, filename)
-        img = cv2.imread(img_path)
-        if img is not None:
-            img = cv2.resize(img, (128, 128))
-            images.append(img)
-            if label is not None:
-                labels.append(label)
+        try:
+            img = cv2.imread(img_path)
+            if img is not None and img.size > 0:
+                img = cv2.resize(img, (128, 128))
+                images.append(img)
+                if label is not None:
+                    labels.append(label)
+        except Exception as e:
+            print(f"Error loading image {img_path}: {e}")
     return images, labels
-
 
 def train_face_recognition_model():
     all_images = []
@@ -194,10 +200,13 @@ def train_face_recognition_model():
 
     X_train, X_test, y_train, y_test = train_test_split(all_images, all_labels, test_size=0.2, random_state=42)
 
-    transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.RandomHorizontalFlip(), transforms.RandomRotation(10),
-            transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
-            transforms.RandomResizedCrop(128, scale=(0.8, 1.0)), ])
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomRotation(10),
+        transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
+        transforms.RandomResizedCrop(128, scale=(0.8, 1.0)),
+    ])
 
     train_dataset = FaceDataset(X_train, y_train, transform=transform)
     test_dataset = FaceDataset(X_test, y_test, transform=transforms.ToTensor())
@@ -223,8 +232,8 @@ def train_face_recognition_model():
             x = self.pool(F.relu(self.conv2(x)))
             x = self.pool(F.relu(self.conv3(x)))
             x = self.pool(F.relu(self.conv4(x)))
-            x = self.pool(F.relu(self.conv5(x)))
-            x = x.view(-1, 512 * 4 * 4)
+            x = self.pool(F.relu(self.conv5(x)))  # 추가
+            x = x.view(-1, 512 * 4 * 4)  # 크기 조정
             x = F.relu(self.fc1(x))
             x = self.dropout(x)
             x = self.fc2(x)
@@ -233,7 +242,7 @@ def train_face_recognition_model():
     model = FaceRecognitionCNN(num_classes).to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.0001)
-    scheduler = ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.1)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.1)
 
     num_epochs = 50
     for epoch in range(num_epochs):
@@ -280,7 +289,6 @@ def train_face_recognition_model():
             correct += (predicted == labels).sum().item()
 
     print("테스트 셋에서의 정확도: ", 100 * correct / total)
-
 
 if __name__ == "__main__":
     print("얼굴 검출 모델 학습 시작...")
