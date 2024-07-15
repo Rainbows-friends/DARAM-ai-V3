@@ -12,7 +12,7 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("CUDA(GPU)" if torch.cuda.is_available() else "CPU")
 print(f"Using device: {device}")
 
 BASE_DIR = 'C:\\DARAM-ai-Archive'
