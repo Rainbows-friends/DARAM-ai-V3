@@ -1,6 +1,7 @@
 import json
 import os
 import random
+
 import cv2
 import numpy as np
 import torch
@@ -11,7 +12,7 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
-cv2.setLogLevel(cv2.LOG_LEVEL_SILENT)
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
@@ -19,6 +20,7 @@ print(f"Using device: {device}")
 BASE_DIR = 'C:\\DARAM-ai-Archive'
 KNOWN_FACES_DIR = os.path.join(BASE_DIR, 'knows_faces')
 OTHER_FACES_DIR = os.path.join(BASE_DIR, 'non_faces')
+
 
 class FaceDataset(Dataset):
     def __init__(self, images, labels, transform=None):
@@ -36,6 +38,7 @@ class FaceDataset(Dataset):
             image = self.transform(image)
         return image, label
 
+
 def load_images_from_folder(folder, label, img_size=(128, 128)):
     images = []
     labels = []
@@ -51,6 +54,7 @@ def load_images_from_folder(folder, label, img_size=(128, 128)):
             except Exception as e:
                 print(f"Error loading image {img_path}: {e}")
     return images, labels
+
 
 def train_face_detection_model():
     all_images = []
@@ -69,13 +73,10 @@ def train_face_detection_model():
 
     X_train, X_test, y_train, y_test = train_test_split(all_images, all_labels, test_size=0.2, random_state=42)
 
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomRotation(10),
-        transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
-        transforms.RandomResizedCrop(128, scale=(0.8, 1.0)),
-    ])
+    transform = transforms.Compose(
+        [transforms.ToTensor(), transforms.RandomHorizontalFlip(), transforms.RandomRotation(10),
+            transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
+            transforms.RandomResizedCrop(128, scale=(0.8, 1.0)), ])
 
     train_dataset = FaceDataset(X_train, y_train, transform=transform)
     test_dataset = FaceDataset(X_test, y_test, transform=transforms.ToTensor())
@@ -90,9 +91,9 @@ def train_face_detection_model():
             self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
             self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1)
             self.conv4 = nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1)
-            self.conv5 = nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1)  # 추가
+            self.conv5 = nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1)
             self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-            self.fc1 = nn.Linear(512 * 4 * 4, 1024)  # 크기 조정
+            self.fc1 = nn.Linear(512 * 4 * 4, 1024)
             self.fc2 = nn.Linear(1024, 2)
             self.dropout = nn.Dropout(0.5)
 
@@ -101,8 +102,8 @@ def train_face_detection_model():
             x = self.pool(F.relu(self.conv2(x)))
             x = self.pool(F.relu(self.conv3(x)))
             x = self.pool(F.relu(self.conv4(x)))
-            x = self.pool(F.relu(self.conv5(x)))  # 추가
-            x = x.view(-1, 512 * 4 * 4)  # 크기 조정
+            x = self.pool(F.relu(self.conv5(x)))
+            x = x.view(-1, 512 * 4 * 4)
             x = F.relu(self.fc1(x))
             x = self.dropout(x)
             x = self.fc2(x)
@@ -129,7 +130,6 @@ def train_face_detection_model():
 
         print(f"Epoch {epoch + 1}, Loss: {running_loss / len(train_loader)}")
 
-        # Validation loss 확인 및 스케줄러 업데이트
         model.eval()
         val_loss = 0.0
         with torch.no_grad():
@@ -141,6 +141,8 @@ def train_face_detection_model():
 
         scheduler.step(val_loss / len(test_loader))
 
+    if os.path.exists('face_detection_model.pth'):
+        os.remove('face_detection_model.pth')
     torch.save(model.state_dict(), 'face_detection_model.pth')
     print("모델 저장 완료: face_detection_model.pth")
 
@@ -156,6 +158,7 @@ def train_face_detection_model():
             correct += (predicted == labels).sum().item()
 
     print("테스트 셋에서의 정확도: ", 100 * correct / total)
+
 
 def load_images_for_recognition(folder, label=None, sample_size=None):
     images = []
@@ -177,6 +180,7 @@ def load_images_for_recognition(folder, label=None, sample_size=None):
         except Exception as e:
             print(f"Error loading image {img_path}: {e}")
     return images, labels
+
 
 def train_face_recognition_model():
     all_images = []
@@ -200,13 +204,10 @@ def train_face_recognition_model():
 
     X_train, X_test, y_train, y_test = train_test_split(all_images, all_labels, test_size=0.2, random_state=42)
 
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomRotation(10),
-        transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
-        transforms.RandomResizedCrop(128, scale=(0.8, 1.0)),
-    ])
+    transform = transforms.Compose(
+        [transforms.ToTensor(), transforms.RandomHorizontalFlip(), transforms.RandomRotation(10),
+            transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
+            transforms.RandomResizedCrop(128, scale=(0.8, 1.0)), ])
 
     train_dataset = FaceDataset(X_train, y_train, transform=transform)
     test_dataset = FaceDataset(X_test, y_test, transform=transforms.ToTensor())
@@ -221,9 +222,9 @@ def train_face_recognition_model():
             self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
             self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1)
             self.conv4 = nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1)
-            self.conv5 = nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1)  # 추가
+            self.conv5 = nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1)
             self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-            self.fc1 = nn.Linear(512 * 4 * 4, 1024)  # 크기 조정
+            self.fc1 = nn.Linear(512 * 4 * 4, 1024)
             self.fc2 = nn.Linear(1024, num_classes)
             self.dropout = nn.Dropout(0.5)
 
@@ -232,8 +233,8 @@ def train_face_recognition_model():
             x = self.pool(F.relu(self.conv2(x)))
             x = self.pool(F.relu(self.conv3(x)))
             x = self.pool(F.relu(self.conv4(x)))
-            x = self.pool(F.relu(self.conv5(x)))  # 추가
-            x = x.view(-1, 512 * 4 * 4)  # 크기 조정
+            x = self.pool(F.relu(self.conv5(x)))
+            x = x.view(-1, 512 * 4 * 4)
             x = F.relu(self.fc1(x))
             x = self.dropout(x)
             x = self.fc2(x)
@@ -271,6 +272,8 @@ def train_face_recognition_model():
 
         scheduler.step(val_loss / len(test_loader))
 
+    if os.path.exists('face_recognition_model.pth'):
+        os.remove('face_recognition_model.pth')
     torch.save(model.state_dict(), 'face_recognition_model.pth')
     print("모델 저장 완료: face_recognition_model.pth")
 
@@ -289,6 +292,7 @@ def train_face_recognition_model():
             correct += (predicted == labels).sum().item()
 
     print("테스트 셋에서의 정확도: ", 100 * correct / total)
+
 
 if __name__ == "__main__":
     print("얼굴 검출 모델 학습 시작...")
