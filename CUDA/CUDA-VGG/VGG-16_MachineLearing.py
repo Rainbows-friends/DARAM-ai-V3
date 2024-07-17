@@ -5,7 +5,6 @@ import time
 
 import cv2
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import psutil
 import torch
@@ -81,10 +80,8 @@ def plot_metrics(metrics, title, filename):
 
 def monitor_system():
     mem = psutil.virtual_memory()
-    mem_available = mem.available / (1024 ** 3)
-    temp = psutil.sensors_temperatures().get('coretemp', [])[0].current if psutil.sensors_temperatures() else 0
-
-    return mem_available, temp
+    mem_available = mem.available / (1024 ** 3)  # Convert to GB
+    return mem_available
 
 
 def train_face_detection_model():
@@ -98,8 +95,8 @@ def train_face_detection_model():
 
     transform = transforms.Compose(
         [transforms.ToTensor(), transforms.RandomHorizontalFlip(), transforms.RandomRotation(10),
-            transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
-            transforms.Resize((224, 224)), ])
+         transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
+         transforms.Resize((224, 224)), ])
 
     train_dataset = FaceDataset(X_train, y_train, transform=transform)
     test_dataset = FaceDataset(X_test, y_test,
@@ -108,7 +105,7 @@ def train_face_detection_model():
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
 
-    model = models.vgg16(pretrained=True)
+    model = models.vgg16(weights='VGG16_Weights.IMAGENET1K_V1')
     for param in model.parameters():
         param.requires_grad = False
 
@@ -122,36 +119,24 @@ def train_face_detection_model():
     num_epochs = 50
     metrics = {'epoch': [], 'train_loss': [], 'val_loss': [], 'train_accuracy': [], 'val_accuracy': []}
 
-    overheating_duration = 0
     under_memory_duration = 0
 
     for epoch in range(num_epochs):
-        mem_available, temp = monitor_system()
+        mem_available = monitor_system()
 
-        while mem_available < 1.5 or temp >= 95:
-            if mem_available < 1.5:
-                under_memory_duration += 1
-            else:
-                under_memory_duration = 0
+        while mem_available < 1.5:
+            under_memory_duration += 1
 
-            if temp >= 95:
-                overheating_duration += 1
-            else:
-                overheating_duration = 0
-
-            if overheating_duration >= 2 or under_memory_duration >= 2:
-                print("System is overheating or low on memory, pausing training...")
-                while temp >= 70 or under_memory_duration >= 2:
+            if under_memory_duration >= 2:
+                print("System is low on memory, pausing training...")
+                while mem_available < 1.5:
                     time.sleep(60)
-                    mem_available, temp = monitor_system()
-                    if mem_available >= 1.5:
-                        under_memory_duration = 0
-                    if temp < 70:
-                        overheating_duration = 0
+                    mem_available = monitor_system()
+                under_memory_duration = 0
                 print("Resuming training...")
 
             time.sleep(60)
-            mem_available, temp = monitor_system()
+            mem_available = monitor_system()
 
         model.train()
         running_loss = 0.0
@@ -253,31 +238,22 @@ def load_images_for_recognition(folder, label=None, sample_size=None):
 
 
 def train_face_recognition_model():
-    all_images = []
-    all_labels = []
-    valid_classes = []
-    label_mapping = {}
+    known_faces, known_labels = load_images_for_recognition(KNOWN_FACES_DIR)
+    all_images = known_faces
+    all_labels = known_labels
 
-    for label, face_dir in enumerate(os.listdir(KNOWN_FACES_DIR)):
-        face_path = os.path.join(KNOWN_FACES_DIR, face_dir)
-        if face_dir == 'Other':
-            continue
-        valid_classes.append(face_dir)
-        label_mapping[len(valid_classes) - 1] = face_dir
-        images, labels = load_images_for_recognition(face_path, len(valid_classes) - 1)
-        all_images.extend(images)
-        all_labels.extend(labels)
+    valid_classes = list(set(all_labels))
+    label_mapping = {i: valid_classes[i] for i in range(len(valid_classes))}
 
     num_classes = len(valid_classes)
-    all_images = np.array(all_images, dtype="float32") / 255.0
-    all_labels = np.array(all_labels, dtype="int64")
+    all_labels = [label_mapping[label] for label in all_labels]
 
     X_train, X_test, y_train, y_test = train_test_split(all_images, all_labels, test_size=0.2, random_state=42)
 
     transform = transforms.Compose(
         [transforms.ToTensor(), transforms.RandomHorizontalFlip(), transforms.RandomRotation(10),
-            transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
-            transforms.Resize((224, 224)), ])
+         transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
+         transforms.Resize((224, 224)), ])
 
     train_dataset = FaceDataset(X_train, y_train, transform=transform)
     test_dataset = FaceDataset(X_test, y_test,
@@ -286,7 +262,7 @@ def train_face_recognition_model():
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
 
-    model = models.vgg16(pretrained=True)
+    model = models.vgg16(weights='VGG16_Weights.IMAGENET1K_V1')
     for param in model.parameters():
         param.requires_grad = False
 
@@ -300,36 +276,24 @@ def train_face_recognition_model():
     num_epochs = 50
     metrics = {'epoch': [], 'train_loss': [], 'val_loss': [], 'train_accuracy': [], 'val_accuracy': []}
 
-    overheating_duration = 0
     under_memory_duration = 0
 
     for epoch in range(num_epochs):
-        mem_available, temp = monitor_system()
+        mem_available = monitor_system()
 
-        while mem_available < 1.5 or temp >= 95:
-            if mem_available < 1.5:
-                under_memory_duration += 1
-            else:
-                under_memory_duration = 0
+        while mem_available < 1.5:
+            under_memory_duration += 1
 
-            if temp >= 95:
-                overheating_duration += 1
-            else:
-                overheating_duration = 0
-
-            if overheating_duration >= 2 or under_memory_duration >= 2:
-                print("System is overheating or low on memory, pausing training...")
-                while temp >= 70 or under_memory_duration >= 2:
+            if under_memory_duration >= 2:
+                print("System is low on memory, pausing training...")
+                while mem_available < 1.5:
                     time.sleep(60)
-                    mem_available, temp = monitor_system()
-                    if mem_available >= 1.5:
-                        under_memory_duration = 0
-                    if temp < 70:
-                        overheating_duration = 0
+                    mem_available = monitor_system()
+                under_memory_duration = 0
                 print("Resuming training...")
 
             time.sleep(60)
-            mem_available, temp = monitor_system()
+            mem_available = monitor_system()
 
         model.train()
         running_loss = 0.0
