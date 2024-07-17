@@ -8,3 +8,5 @@ if torch.cuda.is_available():
         print(f"GPU {i}: {torch.cuda.get_device_name(i)}")
 else:
     print("No CUDA-enabled GPU found.")
+
+

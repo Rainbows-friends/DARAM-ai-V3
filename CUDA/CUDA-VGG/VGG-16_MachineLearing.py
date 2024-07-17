@@ -1,10 +1,13 @@
-import cv2
 import json
+import os
+import random
+import time
+
+import cv2
 import matplotlib.pyplot as plt
 import numpy as np
-import os
 import pandas as pd
-import random
+import psutil
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -76,20 +79,20 @@ def plot_metrics(metrics, title, filename):
     plt.close()
 
 
+def monitor_system():
+    mem = psutil.virtual_memory()
+    mem_available = mem.available / (1024 ** 3)
+    temp = psutil.sensors_temperatures().get('coretemp', [])[0].current if psutil.sensors_temperatures() else 0
+
+    return mem_available, temp
+
+
 def train_face_detection_model():
-    all_images = []
-    all_labels = []
-
     known_faces, known_labels = load_images_from_folder(KNOWN_FACES_DIR, 1)
-    all_images.extend(known_faces)
-    all_labels.extend(known_labels)
-
     non_faces, non_labels = load_images_from_folder(OTHER_FACES_DIR, 0)
-    all_images.extend(non_faces)
-    all_labels.extend(non_labels)
 
-    all_images = np.array(all_images, dtype="float32") / 255.0
-    all_labels = np.array(all_labels, dtype="int64")
+    all_images = known_faces + non_faces
+    all_labels = known_labels + non_labels
 
     X_train, X_test, y_train, y_test = train_test_split(all_images, all_labels, test_size=0.2, random_state=42)
 
@@ -119,7 +122,37 @@ def train_face_detection_model():
     num_epochs = 50
     metrics = {'epoch': [], 'train_loss': [], 'val_loss': [], 'train_accuracy': [], 'val_accuracy': []}
 
+    overheating_duration = 0
+    under_memory_duration = 0
+
     for epoch in range(num_epochs):
+        mem_available, temp = monitor_system()
+
+        while mem_available < 1.5 or temp >= 95:
+            if mem_available < 1.5:
+                under_memory_duration += 1
+            else:
+                under_memory_duration = 0
+
+            if temp >= 95:
+                overheating_duration += 1
+            else:
+                overheating_duration = 0
+
+            if overheating_duration >= 2 or under_memory_duration >= 2:
+                print("System is overheating or low on memory, pausing training...")
+                while temp >= 70 or under_memory_duration >= 2:
+                    time.sleep(60)
+                    mem_available, temp = monitor_system()
+                    if mem_available >= 1.5:
+                        under_memory_duration = 0
+                    if temp < 70:
+                        overheating_duration = 0
+                print("Resuming training...")
+
+            time.sleep(60)
+            mem_available, temp = monitor_system()
+
         model.train()
         running_loss = 0.0
         correct_train = 0
@@ -267,7 +300,37 @@ def train_face_recognition_model():
     num_epochs = 50
     metrics = {'epoch': [], 'train_loss': [], 'val_loss': [], 'train_accuracy': [], 'val_accuracy': []}
 
+    overheating_duration = 0
+    under_memory_duration = 0
+
     for epoch in range(num_epochs):
+        mem_available, temp = monitor_system()
+
+        while mem_available < 1.5 or temp >= 95:
+            if mem_available < 1.5:
+                under_memory_duration += 1
+            else:
+                under_memory_duration = 0
+
+            if temp >= 95:
+                overheating_duration += 1
+            else:
+                overheating_duration = 0
+
+            if overheating_duration >= 2 or under_memory_duration >= 2:
+                print("System is overheating or low on memory, pausing training...")
+                while temp >= 70 or under_memory_duration >= 2:
+                    time.sleep(60)
+                    mem_available, temp = monitor_system()
+                    if mem_available >= 1.5:
+                        under_memory_duration = 0
+                    if temp < 70:
+                        overheating_duration = 0
+                print("Resuming training...")
+
+            time.sleep(60)
+            mem_available, temp = monitor_system()
+
         model.train()
         running_loss = 0.0
         correct_train = 0
