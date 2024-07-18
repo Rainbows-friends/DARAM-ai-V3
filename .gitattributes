@@ -1,0 +1,4 @@
+C:DARAM-ai-V3CUDAface_detection_model.pth filter=lfs diff=lfs merge=lfs -text
+C:DARAM-ai-V3CUDAface_recognition.pth filter=lfs diff=lfs merge=lfs -text
+C:DARAM-ai-V3CUDACUDA-VGGface_recognition_model.pth filter=lfs diff=lfs merge=lfs -text
+C:DARAM-ai-V3CUDACUDA-VGGface_detection_model.pth filter=lfs diff=lfs merge=lfs -text
