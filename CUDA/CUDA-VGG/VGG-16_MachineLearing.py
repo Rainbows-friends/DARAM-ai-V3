@@ -84,6 +84,26 @@ def monitor_system():
     return mem_available
 
 
+class EarlyStopping:
+    def __init__(self, patience=5, min_delta=0):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.counter = 0
+        self.best_loss = None
+        self.early_stop = False
+
+    def __call__(self, val_loss):
+        if self.best_loss is None:
+            self.best_loss = val_loss
+        elif val_loss > self.best_loss - self.min_delta:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_loss = val_loss
+            self.counter = 0
+
+
 def train_face_detection_model():
     known_faces, known_labels = load_images_from_folder(KNOWN_FACES_DIR, 1)
     non_faces, non_labels = load_images_from_folder(OTHER_FACES_DIR, 0)
@@ -110,6 +130,7 @@ def train_face_detection_model():
         param.requires_grad = False
 
     model.classifier[6] = nn.Linear(model.classifier[6].in_features, 2)
+    model.classifier.add_module('dropout', nn.Dropout(0.5))  # 추가: 드롭아웃
     model = model.to(device)
 
     criterion = nn.CrossEntropyLoss()
@@ -117,6 +138,7 @@ def train_face_detection_model():
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.1)
 
     num_epochs = 50
+    early_stopping = EarlyStopping(patience=5, min_delta=0.01)
     metrics = {'epoch': [], 'train_loss': [], 'val_loss': [], 'train_accuracy': [], 'val_accuracy': []}
 
     under_memory_duration = 0
@@ -192,6 +214,11 @@ def train_face_detection_model():
 
         print(f'Epoch {epoch + 1}, Train Loss: {train_loss}, Validation Loss: {val_loss}, '
               f'Train Accuracy: {train_accuracy}, Validation Accuracy: {val_accuracy}')
+
+        early_stopping(val_loss)
+        if early_stopping.early_stop:
+            print("Early stopping")
+            break
 
     if os.path.exists('face_detection_model.pth'):
         os.remove('face_detection_model.pth')
@@ -267,11 +294,13 @@ def train_face_recognition_model():
         param.requires_grad = False
 
     model.classifier[6] = nn.Linear(model.classifier[6].in_features, num_classes)
+    model.classifier.add_module('dropout', nn.Dropout(0.5))  # 추가: 드롭아웃
     model = model.to(device)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.classifier[6].parameters(), lr=0.0001)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.1)
+    early_stopping = EarlyStopping(patience=5, min_delta=0.01)
 
     num_epochs = 50
     metrics = {'epoch': [], 'train_loss': [], 'val_loss': [], 'train_accuracy': [], 'val_accuracy': []}
@@ -349,6 +378,11 @@ def train_face_recognition_model():
 
         print(f'Epoch {epoch + 1}, Train Loss: {train_loss}, Validation Loss: {val_loss}, '
               f'Train Accuracy: {train_accuracy}, Validation Accuracy: {val_accuracy}')
+
+        early_stopping(val_loss)
+        if early_stopping.early_stop:
+            print("Early stopping")
+            break
 
     if os.path.exists('face_recognition_model.pth'):
         os.remove('face_recognition_model.pth')
