@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-import random
 import time
 
 import cv2
@@ -22,7 +21,8 @@ print(f"Using device: {device}")
 
 BASE_DIR = 'C:\\DARAM-ai-Archive'
 KNOWN_FACES_DIR = os.path.join(BASE_DIR, 'knows_faces')
-OTHER_FACES_DIR = os.path.join(BASE_DIR, 'non_faces')
+OTHER_FACES_DIR = os.path.join(KNOWN_FACES_DIR, 'Other')
+NON_FACES_DIR = os.path.join(BASE_DIR, 'non_faces')
 
 logging.basicConfig(filename='error_log.txt', level=logging.ERROR, format='%(asctime)s:%(levelname)s:%(message)s')
 
@@ -44,7 +44,7 @@ class FaceDataset(Dataset):
         return image, label
 
 
-def load_images_from_folder(folder, label, img_size=(224, 224)):
+def load_images_from_folder(folder, label=None, img_size=(224, 224)):
     images = []
     labels = []
     for subdir, dirs, files in os.walk(folder):
@@ -55,9 +55,12 @@ def load_images_from_folder(folder, label, img_size=(224, 224)):
                 if img is not None and img.size > 0:
                     img = cv2.resize(img, img_size)
                     images.append(img)
-                    labels.append(label)
+                    if label is not None:
+                        labels.append(label)
                 else:
-                    print(f"Warning: Skipping invalid image {img_path}")
+                    warning_message = f"Warning: Skipping invalid image {img_path}"
+                    print(warning_message)
+                    logging.warning(f"Warning Code 10003: {warning_message}")
             except Exception as e:
                 print(f"Error loading image {img_path}: {e}")
     return images, labels
@@ -113,15 +116,30 @@ def log_error(message, error_code):
     logging.error(f"Error Code {error_code}: {message}")
 
 
-def train_face_detection_model():
-    known_faces, known_labels = load_images_from_folder(KNOWN_FACES_DIR, 1)
-    non_faces, non_labels = load_images_from_folder(OTHER_FACES_DIR, 0)
+def load_faces_and_labels():
+    known_faces = []
+    known_labels = []
+    non_faces, _ = load_images_from_folder(NON_FACES_DIR, 0)
+    other_faces, _ = load_images_from_folder(OTHER_FACES_DIR, 0)
 
-    all_images = known_faces + non_faces
-    all_labels = known_labels + non_labels
+    for person_name in os.listdir(KNOWN_FACES_DIR):
+        person_dir = os.path.join(KNOWN_FACES_DIR, person_name)
+        if os.path.isdir(person_dir) and person_name != "Other":
+            person_images, _ = load_images_from_folder(person_dir, 1)
+            known_faces.extend(person_images)
+            known_labels.extend([person_name] * len(person_images))
+
+    return known_faces, known_labels, non_faces, other_faces
+
+
+def train_face_detection_model():
+    known_faces, known_labels, non_faces, other_faces = load_faces_and_labels()
+
+    all_images = known_faces + non_faces + other_faces
+    all_labels = known_labels + [0] * (len(non_faces) + len(other_faces))
 
     if len(all_images) == 0:
-        log_error(f"No images found in {KNOWN_FACES_DIR} and {OTHER_FACES_DIR}", 10000)
+        log_error(f"No images found in {KNOWN_FACES_DIR} and {OTHER_FACES_DIR} and {NON_FACES_DIR}", 10000)
         return
 
     X_train, X_test, y_train, y_test = train_test_split(all_images, all_labels, test_size=0.2, random_state=42)
@@ -254,50 +272,28 @@ def train_face_detection_model():
     print("테스트 셋에서의 정확도: ", 100 * correct / total)
 
 
-def load_images_for_recognition(folder, label=None, sample_size=None):
-    images = []
-    labels = []
-    try:
-        file_list = os.listdir(folder)
-    except FileNotFoundError as e:
-        log_error(f"FileNotFoundError: {str(e)}", 10001)
-        return images, labels
-
-    if sample_size is not None and len(file_list) > sample_size:
-        file_list = random.sample(file_list, sample_size)
-
-    for filename in file_list:
-        img_path = os.path.join(folder, filename)
-        try:
-            img = cv2.imread(img_path)
-            if img is not None and img.size > 0:
-                img = cv2.resize(img, (224, 224))
-                images.append(img)
-                if label is not None:
-                    labels.append(label)
-            else:
-                print(f"Warning: Skipping invalid image {img_path}")
-        except Exception as e:
-            print(f"Error loading image {img_path}: {e}")
-    return images, labels
-
-
 def train_face_recognition_model():
-    known_faces, known_labels = load_images_for_recognition(KNOWN_FACES_DIR)
-    all_images = known_faces
-    all_labels = known_labels
+    known_faces = []
+    known_labels = []
 
-    if len(all_images) == 0:
-        log_error(f"No images found in {KNOWN_FACES_DIR}", 10000)
+    for person_name in os.listdir(KNOWN_FACES_DIR):
+        person_dir = os.path.join(KNOWN_FACES_DIR, person_name)
+        if os.path.isdir(person_dir) and person_name != "Other":
+            person_images, _ = load_images_from_folder(person_dir, person_name)
+            known_faces.extend(person_images)
+            known_labels.extend([person_name] * len(person_images))
+
+    if len(known_faces) == 0:
+        log_error(f"No images found in {KNOWN_FACES_DIR} except 'Other'", 10000)
         return
 
-    valid_classes = list(set(all_labels))
+    valid_classes = list(set(known_labels))
     label_mapping = {i: valid_classes[i] for i in range(len(valid_classes))}
 
     num_classes = len(valid_classes)
-    all_labels = [label_mapping[label] for label in all_labels]
+    all_labels = [label_mapping[label] for label in known_labels]
 
-    X_train, X_test, y_train, y_test = train_test_split(all_images, all_labels, test_size=0.2, random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(known_faces, all_labels, test_size=0.2, random_state=42)
 
     transform = transforms.Compose(
         [transforms.ToTensor(), transforms.RandomHorizontalFlip(), transforms.RandomRotation(10),
