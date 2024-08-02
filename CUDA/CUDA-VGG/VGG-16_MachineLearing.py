@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import random
 import time
@@ -22,6 +23,8 @@ print(f"Using device: {device}")
 BASE_DIR = 'C:\\DARAM-ai-Archive'
 KNOWN_FACES_DIR = os.path.join(BASE_DIR, 'knows_faces')
 OTHER_FACES_DIR = os.path.join(BASE_DIR, 'non_faces')
+
+logging.basicConfig(filename='error_log.txt', level=logging.ERROR, format='%(asctime)s:%(levelname)s:%(message)s')
 
 
 class FaceDataset(Dataset):
@@ -53,6 +56,8 @@ def load_images_from_folder(folder, label, img_size=(224, 224)):
                     img = cv2.resize(img, img_size)
                     images.append(img)
                     labels.append(label)
+                else:
+                    print(f"Warning: Skipping invalid image {img_path}")
             except Exception as e:
                 print(f"Error loading image {img_path}: {e}")
     return images, labels
@@ -104,12 +109,20 @@ class EarlyStopping:
             self.counter = 0
 
 
+def log_error(message, error_code):
+    logging.error(f"Error Code {error_code}: {message}")
+
+
 def train_face_detection_model():
     known_faces, known_labels = load_images_from_folder(KNOWN_FACES_DIR, 1)
     non_faces, non_labels = load_images_from_folder(OTHER_FACES_DIR, 0)
 
     all_images = known_faces + non_faces
     all_labels = known_labels + non_labels
+
+    if len(all_images) == 0:
+        log_error(f"No images found in {KNOWN_FACES_DIR} and {OTHER_FACES_DIR}", 10000)
+        return
 
     X_train, X_test, y_train, y_test = train_test_split(all_images, all_labels, test_size=0.2, random_state=42)
 
@@ -130,11 +143,10 @@ def train_face_detection_model():
         param.requires_grad = False
 
     model.classifier[6] = nn.Linear(model.classifier[6].in_features, 2)
-    model.classifier.add_module('dropout', nn.Dropout(0.5))  # 추가: 드롭아웃
     model = model.to(device)
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.classifier[6].parameters(), lr=0.0001)
+    optimizer = optim.Adam(model.parameters(), lr=0.0001)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.1)
 
     num_epochs = 50
@@ -245,7 +257,11 @@ def train_face_detection_model():
 def load_images_for_recognition(folder, label=None, sample_size=None):
     images = []
     labels = []
-    file_list = os.listdir(folder)
+    try:
+        file_list = os.listdir(folder)
+    except FileNotFoundError as e:
+        log_error(f"FileNotFoundError: {str(e)}", 10001)
+        return images, labels
 
     if sample_size is not None and len(file_list) > sample_size:
         file_list = random.sample(file_list, sample_size)
@@ -259,6 +275,8 @@ def load_images_for_recognition(folder, label=None, sample_size=None):
                 images.append(img)
                 if label is not None:
                     labels.append(label)
+            else:
+                print(f"Warning: Skipping invalid image {img_path}")
         except Exception as e:
             print(f"Error loading image {img_path}: {e}")
     return images, labels
@@ -268,6 +286,10 @@ def train_face_recognition_model():
     known_faces, known_labels = load_images_for_recognition(KNOWN_FACES_DIR)
     all_images = known_faces
     all_labels = known_labels
+
+    if len(all_images) == 0:
+        log_error(f"No images found in {KNOWN_FACES_DIR}", 10000)
+        return
 
     valid_classes = list(set(all_labels))
     label_mapping = {i: valid_classes[i] for i in range(len(valid_classes))}
@@ -294,11 +316,10 @@ def train_face_recognition_model():
         param.requires_grad = False
 
     model.classifier[6] = nn.Linear(model.classifier[6].in_features, num_classes)
-    model.classifier.add_module('dropout', nn.Dropout(0.5))  # 추가: 드롭아웃
     model = model.to(device)
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.classifier[6].parameters(), lr=0.0001)
+    optimizer = optim.Adam(model.parameters(), lr=0.0001)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.1)
     early_stopping = EarlyStopping(patience=5, min_delta=0.01)
 
